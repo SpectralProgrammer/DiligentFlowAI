@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState, useTransition } from "react";
+import { FormEvent, useDeferredValue, useEffect, useState, useTransition } from "react";
 
 type Agent = {
   id: string;
@@ -45,6 +45,10 @@ type TaskHistoryItem = {
 
 type PermissionMap = Record<string, string[]>;
 type TokenInfo = { kind: string; ttl_minutes: number; issuer: string; note: string };
+type PreviewSource = "backend" | "fallback";
+type BackendPreview = { inputText: string; task: ParsedTask };
+type ChatMessage = { id: string; role: "assistant" | "user"; content: string };
+type ChatCompletionResponse = { response: string };
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ??
@@ -63,10 +67,28 @@ export default function SmartDashboard() {
   const [permissions, setPermissions] = useState<PermissionMap>({});
   const [tokenInfo, setTokenInfo] = useState<TokenInfo | null>(null);
   const [result, setResult] = useState<TaskResponse | null>(null);
+  const [backendPreview, setBackendPreview] = useState<BackendPreview | null>(null);
+  const [chatInput, setChatInput] = useState("Explain how this project uses AI and permissions.");
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    {
+      id: "welcome",
+      role: "assistant",
+      content:
+        "Local Ollama is connected through the backend /chat route. Ask a question here to test the model from the UI.",
+    },
+  ]);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [isChatLoading, setIsChatLoading] = useState(false);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const deferredPrompt = useDeferredValue(prompt);
+  const trimmedPrompt = prompt.trim();
 
-  const preview = result?.parsed_task ?? inferRoute(prompt);
+  const livePreview =
+    backendPreview?.inputText === trimmedPrompt ? backendPreview.task : null;
+  const preview = livePreview ?? inferRoute(trimmedPrompt);
+  const previewSource: PreviewSource = livePreview ? "backend" : "fallback";
   const focusedAgent = agents.find((agent) => agent.id === preview.agent_id) ?? null;
   const approvalRate =
     history.length === 0
@@ -81,28 +103,11 @@ export default function SmartDashboard() {
 
     async function loadDashboard() {
       try {
-        const [agentsResponse, historyResponse, permissionsResponse, tokenResponse] =
-          await Promise.all([
-            fetch(`${apiBaseUrl}/agents`),
-            fetch(`${apiBaseUrl}/history`),
-            fetch(`${apiBaseUrl}/permissions`),
-            fetch(`${apiBaseUrl}/tokens/about`),
-          ]);
-
-        if (
-          !agentsResponse.ok ||
-          !historyResponse.ok ||
-          !permissionsResponse.ok ||
-          !tokenResponse.ok
-        ) {
-          throw new Error("Unable to load backend data.");
-        }
-
         const [agentsData, historyData, permissionsData, tokenData] = await Promise.all([
-          agentsResponse.json() as Promise<Agent[]>,
-          historyResponse.json() as Promise<TaskHistoryItem[]>,
-          permissionsResponse.json() as Promise<PermissionMap>,
-          tokenResponse.json() as Promise<TokenInfo>,
+          fetchJson<Agent[]>(`${apiBaseUrl}/agents`),
+          fetchJson<TaskHistoryItem[]>(`${apiBaseUrl}/history`),
+          fetchJson<PermissionMap>(`${apiBaseUrl}/permissions`),
+          fetchJson<TokenInfo>(`${apiBaseUrl}/tokens/about`),
         ]);
 
         if (!cancelled) {
@@ -126,27 +131,73 @@ export default function SmartDashboard() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    const previewPrompt = deferredPrompt.trim();
+    const controller = new AbortController();
+
+    if (previewPrompt.length < 3) {
+      const resetLoadingId = window.setTimeout(() => {
+        if (!cancelled) {
+          setIsPreviewLoading(false);
+        }
+      }, 0);
+
+      return () => {
+        cancelled = true;
+        controller.abort();
+        window.clearTimeout(resetLoadingId);
+      };
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      if (cancelled) {
+        return;
+      }
+
+      setIsPreviewLoading(true);
+
+      void fetchJson<ParsedTask>(`${apiBaseUrl}/tasks/preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ input_text: previewPrompt }),
+        signal: controller.signal,
+      })
+        .then((data) => {
+          if (!cancelled) {
+            setBackendPreview({ inputText: previewPrompt, task: data });
+          }
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          if (!cancelled) {
+            setIsPreviewLoading(false);
+          }
+        });
+    }, 220);
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      window.clearTimeout(timeoutId);
+    };
+  }, [deferredPrompt]);
+
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
 
     startTransition(async () => {
       try {
-        const response = await fetch(`${apiBaseUrl}/tasks`, {
+        const data = await fetchJson<TaskResponse>(`${apiBaseUrl}/tasks`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ input_text: prompt }),
         });
-
-        if (!response.ok) {
-          throw new Error("Task execution failed.");
-        }
-
-        const data = (await response.json()) as TaskResponse;
-        const historyResponse = await fetch(`${apiBaseUrl}/history`);
-        const updatedHistory = (await historyResponse.json()) as TaskHistoryItem[];
+        const updatedHistory = await fetchJson<TaskHistoryItem[]>(`${apiBaseUrl}/history`);
 
         setResult(data);
+        setBackendPreview({ inputText: trimmedPrompt, task: data.parsed_task });
         setHistory(updatedHistory);
       } catch {
         setError(
@@ -154,6 +205,51 @@ export default function SmartDashboard() {
         );
       }
     });
+  }
+
+  function handleChatSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const trimmedChatInput = chatInput.trim();
+    if (!trimmedChatInput || isChatLoading) {
+      return;
+    }
+
+    const userMessage = createChatMessage("user", trimmedChatInput);
+    setChatError(null);
+    setChatMessages((currentMessages) => [...currentMessages, userMessage]);
+    setChatInput("");
+    setIsChatLoading(true);
+
+    void fetchJson<ChatCompletionResponse>(`${apiBaseUrl}/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: trimmedChatInput }),
+    })
+      .then((data) => {
+        setChatMessages((currentMessages) => [
+          ...currentMessages,
+          createChatMessage("assistant", data.response),
+        ]);
+      })
+      .catch((caughtError: unknown) => {
+        const message =
+          caughtError instanceof Error
+            ? caughtError.message
+            : "The Ollama request failed. Confirm the backend and local model are running.";
+
+        setChatError(message);
+        setChatMessages((currentMessages) => [
+          ...currentMessages,
+          createChatMessage(
+            "assistant",
+            "I couldn't answer from Ollama just now. Check the backend logs, then try again."
+          ),
+        ]);
+      })
+      .finally(() => {
+        setIsChatLoading(false);
+      });
   }
 
   return (
@@ -249,6 +345,10 @@ export default function SmartDashboard() {
                     <InlineRow label="Action" value={preview.action} />
                     <InlineRow label="Resource" value={preview.resource} />
                     <InlineRow label="Confidence" value={preview.confidence} />
+                    <InlineRow
+                      label="Source"
+                      value={isPreviewLoading ? "Refreshing" : previewSource === "backend" ? "Backend parser" : "Local fallback"}
+                    />
                     <InlineRow label="Broker" value={tokenInfo?.issuer ?? "Demo vault"} />
                   </div>
                 </div>
@@ -346,6 +446,78 @@ export default function SmartDashboard() {
           </div>
 
           <div className="space-y-6">
+            <section className="reveal-up rounded-[32px] border border-white/10 bg-[#0f1b24]/92 p-6 shadow-[0_26px_90px_rgba(0,0,0,0.24)] [animation-delay:140ms]">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.28em] text-slate-400">
+                    Local Ollama
+                  </p>
+                  <h2 className="mt-2 text-3xl font-semibold text-white">
+                    Test the model directly from the dashboard.
+                  </h2>
+                </div>
+                <Badge tone="outline">/chat</Badge>
+              </div>
+
+              <div className="mt-5 rounded-[28px] border border-white/10 bg-[#071118] p-4">
+                <div className="max-h-[320px] space-y-3 overflow-y-auto pr-1">
+                  {chatMessages.map((message) => (
+                    <div
+                      key={message.id}
+                      className={`rounded-[22px] px-4 py-3 text-sm leading-7 ${
+                        message.role === "assistant"
+                          ? "border border-white/10 bg-white/[0.05] text-slate-100"
+                          : "ml-auto max-w-[88%] bg-[linear-gradient(135deg,_#82ffd7,_#6dd6ff)] text-slate-950"
+                      }`}
+                    >
+                      <p className="text-[11px] uppercase tracking-[0.22em] opacity-70">
+                        {message.role === "assistant" ? "Model" : "You"}
+                      </p>
+                      <p className="mt-2 whitespace-pre-wrap">{message.content}</p>
+                    </div>
+                  ))}
+
+                  {isChatLoading ? (
+                    <div className="max-w-[88%] rounded-[22px] border border-white/10 bg-white/[0.05] px-4 py-3 text-sm leading-7 text-slate-100">
+                      <p className="text-[11px] uppercase tracking-[0.22em] opacity-70">
+                        Model
+                      </p>
+                      <p className="mt-2">Thinking with local Ollama...</p>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              <form className="mt-4 space-y-4" onSubmit={handleChatSubmit}>
+                <textarea
+                  value={chatInput}
+                  onChange={(event) => setChatInput(event.target.value)}
+                  rows={4}
+                  className="w-full rounded-[24px] border border-white/10 bg-[#071118] px-4 py-4 text-sm leading-7 text-slate-100 outline-none transition focus:border-cyan-300/35 focus:shadow-[0_0_0_4px_rgba(109,214,255,0.08)]"
+                  placeholder="Ask Ollama about the project, the code, or anything you want to test..."
+                />
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-sm leading-6 text-slate-400">
+                    This panel sends your prompt to the backend, which forwards it to local Ollama.
+                  </p>
+                  <button
+                    type="submit"
+                    disabled={isChatLoading}
+                    className="rounded-full bg-[linear-gradient(135deg,_#82ffd7,_#6dd6ff)] px-6 py-3 text-sm font-semibold text-slate-950 transition hover:brightness-105 disabled:cursor-not-allowed disabled:brightness-75"
+                  >
+                    {isChatLoading ? "Waiting for Ollama..." : "Ask Ollama"}
+                  </button>
+                </div>
+              </form>
+
+              {chatError ? (
+                <div className="mt-4 rounded-[24px] border border-rose-300/20 bg-rose-300/8 p-4 text-sm leading-6 text-rose-100">
+                  {chatError}
+                </div>
+              ) : null}
+            </section>
+
             <section className="reveal-up rounded-[32px] border border-white/10 bg-white/5 p-6 backdrop-blur-xl [animation-delay:160ms]">
               <p className="text-[11px] uppercase tracking-[0.28em] text-slate-400">Policy map</p>
               <div className="mt-4 space-y-3">
@@ -462,6 +634,35 @@ function inferRoute(inputText: string): ParsedTask {
     resource: "market-data",
     confidence: "medium",
     reasoning: "The prompt does not match communication or scheduling keywords, so finance analysis is the fallback route.",
+  };
+}
+
+async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
+  const response = await fetch(input, init);
+  const payload = (await response.json().catch(() => null)) as
+    | T
+    | { detail?: unknown }
+    | null;
+
+  if (!response.ok) {
+    const detail =
+      payload && typeof payload === "object" && "detail" in payload
+        ? payload.detail
+        : null;
+
+    throw new Error(
+      typeof detail === "string" ? detail : `Request failed with status ${response.status}`
+    );
+  }
+
+  return payload as T;
+}
+
+function createChatMessage(role: ChatMessage["role"], content: string): ChatMessage {
+  return {
+    id: `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    role,
+    content,
   };
 }
 
