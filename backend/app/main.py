@@ -33,6 +33,14 @@ def create_app() -> FastAPI:
     app.include_router(tokens_router, dependencies=protected_dependencies)
     app.include_router(google_router)
 
+    @app.get("/healthz")
+    def healthcheck():
+        return {
+            "status": "ok",
+            "auth0_enabled": settings.auth0_enabled,
+            "google_enabled": settings.google_enabled,
+        }
+
     @app.get("/")
     def root():
         return {
@@ -44,6 +52,7 @@ def create_app() -> FastAPI:
                 "audience": settings.auth0_audience,
             },
             "available_routes": [
+                "/healthz",
                 "/chat",
                 "/dashboard/bootstrap",
                 "/tasks",

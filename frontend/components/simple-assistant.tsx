@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState, useTransition } from "react";
+import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useRef, useState, useTransition } from "react";
 import {
   Bot,
   CheckCircle2,
@@ -667,7 +667,7 @@ function Composer({
 }
 
 function handleComposerKeyDown(
-  event: React.KeyboardEvent<HTMLTextAreaElement>,
+  event: KeyboardEvent<HTMLTextAreaElement>,
   disabled: boolean
 ) {
   if (disabled || event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) {
@@ -1090,7 +1090,7 @@ function normalizeHeading(line: string) {
 }
 
 function renderInlineContent(text: string) {
-  const nodes: Array<string | JSX.Element> = [];
+  const nodes: ReactNode[] = [];
   const pattern = /(\*\*[^*]+\*\*|`[^`]+`)/g;
   let lastIndex = 0;
 

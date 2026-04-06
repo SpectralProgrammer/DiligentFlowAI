@@ -12,6 +12,7 @@ const tailwindPostcssPackagePath = path.join(
 );
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   turbopack: {
     root: configDir,
     resolveAlias: {

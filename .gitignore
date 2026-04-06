@@ -32,7 +32,9 @@ next-env.d.ts
 # Python / Backend
 # =========================
 venv/
+.venv/
 backend/venv/
+backend/.venv/
 backend/data/
 
 __pycache__/
@@ -53,6 +55,7 @@ dist/
 .env
 .env.*
 *.env
+!.env.example
 
 # =========================
 # OS / Editor
