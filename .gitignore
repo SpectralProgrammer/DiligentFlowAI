@@ -33,11 +33,13 @@ next-env.d.ts
 # =========================
 venv/
 backend/venv/
+backend/data/
 
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.db
 
 # Python build artifacts
 build/
