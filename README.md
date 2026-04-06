@@ -13,6 +13,8 @@ The system is powered by a modular agent architecture, where specialized agents 
 
 DiligentFlowAI uses hosted AI models to analyze user data, generate insights, and recommend actions in real time. The result is a privacy-conscious, automated assistant that helps users stay organized and productive without manually managing their digital workflows.
 
+---
+
 - the user signs in with `Auth0`
 - the frontend requests an Auth0 access token for a backend API audience
 - the backend validates that token
