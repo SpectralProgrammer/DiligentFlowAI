@@ -1,6 +1,5 @@
 # DiligentFlowAI
 
-Authorized to Act is a split `Next.js` + `FastAPI` application that demonstrates a simple but opinionated pattern for protected AI workflows:
 <div align="center">
   <img width="500" alt="image" src="https://github.com/user-attachments/assets/3b15e597-00c2-4db3-ae74-640084abe77f" />
 </div>
@@ -14,6 +13,7 @@ The system is powered by a modular agent architecture, where specialized agents 
 DiligentFlowAI uses hosted AI models to analyze user data, generate insights, and recommend actions in real time. The result is a privacy-conscious, automated assistant that helps users stay organized and productive without manually managing their digital workflows.
 
 ---
+DiligentFlowAI is a split `Next.js` + `FastAPI` application that demonstrates a simple but opinionated pattern for protected AI workflows:
 
 - the user signs in with `Auth0`
 - the frontend requests an Auth0 access token for a backend API audience
