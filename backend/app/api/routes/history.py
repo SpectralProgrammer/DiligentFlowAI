@@ -1,5 +1,4 @@
 from fastapi import APIRouter
-
 from app.models.task import TaskRecord
 from app.orchestrator.orchestrator import list_task_history
 

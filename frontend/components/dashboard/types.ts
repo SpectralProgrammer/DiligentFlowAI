@@ -61,9 +61,35 @@ export type ChatMessage = {
   id: string;
   role: "assistant" | "user";
   content: string;
+  kind: "conversation" | "status";
+};
+
+export type ChatRequestMessage = Pick<ChatMessage, "role" | "content">;
+
+export type ChatCompletionRequest = {
+  prompt?: string;
+  messages?: ChatRequestMessage[];
 };
 
 export type ChatCompletionResponse = { response: string };
+
+export type GoogleConnectResponse = {
+  auth_url: string;
+};
+
+export type GoogleStatus = {
+  connected: boolean;
+  email: string | null;
+  scopes: string[];
+  updated_at: string | null;
+};
+
+export type GoogleSummaryResponse = {
+  response: string;
+  email_count: number;
+  event_count: number;
+  connected_email: string | null;
+};
 
 export type DashboardBootstrapResponse = {
   agents: Agent[];

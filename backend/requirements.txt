@@ -1,6 +1,6 @@
 fastapi
 uvicorn
 pydantic
-ollama
 python-dotenv
 PyJWT[crypto]
+cryptography

@@ -19,60 +19,43 @@ pip install -r requirements.txt
 
 Expected result:
 
-* All packages (`fastapi`, `uvicorn`, `pydantic`, `ollama`) install successfully
+* All packages (`fastapi`, `uvicorn`, `pydantic`) install successfully
 * No errors in the terminal
 
 ---
 
-## 3. Install Ollama
+## 3. Get a Gemini API Key
 
-Download and install Ollama:
-https://ollama.com/download
+Create an API key in Google AI Studio:
+https://aistudio.google.com/app/apikey
 
-Verify installation:
+Add it to your backend environment:
 
 ```bash
-ollama --version
+GEMINI_API_KEY=your_key_here
 ```
 
 Expected output:
 
-* A version number (e.g., `ollama version 0.x.x`)
+* The key is available to the backend process
 
 ---
 
-## 4. Pull the Required Model
+## 4. Choose a Gemini Model
 
-This project uses the **llama3:8b** model.
+This project defaults to **gemini-2.0-flash**.
 
 ```bash
-ollama pull llama3:8b
+GEMINI_MODEL=gemini-2.0-flash
 ```
 
 Expected output:
 
-* Progress bar showing model download
-* Final message indicating the model is ready
+* The model name is available to the backend process
 
 ---
 
-## 5. Start Ollama
-
-Run:
-
-```bash
-ollama serve
-```
-
-Expected output:
-
-* Message indicating the server is running (e.g., `Listening on localhost:11434`)
-
-⚠️ Keep this terminal running — Ollama must stay active.
-
----
-
-## 6. Run the Backend Server
+## 5. Run the Backend Server
 
 In a **new terminal window**, run:
 
@@ -89,9 +72,7 @@ Expected output:
 Uvicorn running on http://127.0.0.1:8000
 ```
 
----
-
-## 7. Test the API (Swagger UI)
+## 6. Test the API (Swagger UI)
 
 1. Open your browser and go to:
 
@@ -133,20 +114,20 @@ Expected result:
 
 * **Internal Server Error**
 
-  * Ensure Ollama is running (`ollama serve`)
-  * Ensure model is installed (`ollama list`)
+  * Ensure `GEMINI_API_KEY` is set
+  * Ensure the backend has internet access
 
 * **No response / hangs**
 
-  * First request may take a few seconds while the model loads
+  * Retry and check the backend logs for Gemini API errors
 
-* **Model not found**
+* **Invalid API key**
 
 ```bash
-ollama list
+echo %GEMINI_API_KEY%
 ```
 
-Make sure `llama3:8b` appears in the list
+Make sure the key is present and valid
 
 ---
 
@@ -154,7 +135,6 @@ Make sure `llama3:8b` appears in the list
 
 You should now have:
 
-* Ollama running locally
-* `llama3:8b` model installed
+* Gemini API key configured
 * FastAPI server running
 * `/chat` endpoint returning AI responses

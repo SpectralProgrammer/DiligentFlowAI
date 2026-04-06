@@ -24,6 +24,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
   return proxyRequest(request, context);
 }
 
+export async function DELETE(request: NextRequest, context: RouteContext) {
+  return proxyRequest(request, context);
+}
+
 async function proxyRequest(request: NextRequest, context: RouteContext) {
   const session = await auth0.getSession();
 

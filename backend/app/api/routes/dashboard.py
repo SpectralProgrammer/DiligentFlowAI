@@ -1,5 +1,4 @@
 from fastapi import APIRouter
-
 from app.core.config import get_settings
 from app.orchestrator.orchestrator import list_agents, list_task_history
 from app.permissions.openfga_client import list_permissions

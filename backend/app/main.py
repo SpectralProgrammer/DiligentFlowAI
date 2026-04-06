@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes.agents import router as agents_router
 from app.api.routes.chat import router as chat_router
 from app.api.routes.dashboard import router as dashboard_router
+from app.api.routes.google import router as google_router
 from app.api.routes.history import router as history_router
 from app.api.routes.permissions import router as permissions_router
 from app.api.routes.tasks import router as tasks_router
@@ -30,6 +31,7 @@ def create_app() -> FastAPI:
     app.include_router(agents_router, dependencies=protected_dependencies)
     app.include_router(permissions_router, dependencies=protected_dependencies)
     app.include_router(tokens_router, dependencies=protected_dependencies)
+    app.include_router(google_router)
 
     @app.get("/")
     def root():
@@ -50,6 +52,10 @@ def create_app() -> FastAPI:
                 "/agents",
                 "/permissions",
                 "/tokens/about",
+                "/google/status",
+                "/google/connect",
+                "/google/callback",
+                "/google/summary",
             ],
         }
 

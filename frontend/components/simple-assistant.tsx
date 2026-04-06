@@ -6,6 +6,8 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock3,
+  Link2,
+  Link2Off,
   LogOut,
   Plus,
   ShieldCheck,
@@ -15,9 +17,13 @@ import {
 import type {
   Agent,
   AuthenticatedUser,
+  ChatCompletionRequest,
   ChatCompletionResponse,
   ChatMessage,
   DashboardBootstrapResponse,
+  GoogleConnectResponse,
+  GoogleStatus,
+  GoogleSummaryResponse,
   PermissionMap,
   TaskHistoryItem,
   TaskResponse,
@@ -59,13 +65,20 @@ const suggestionCards = [
     mode: "action" as const,
     prompt: actionStarters[2],
   },
+  {
+    id: "google-summary",
+    label: "Ask",
+    mode: "assistant" as const,
+    prompt: "Summarize my unread emails and today's calendar.",
+  },
 ];
 
 const welcomeMessage = {
   id: "welcome",
   role: "assistant" as const,
+  kind: "status" as const,
   content:
-    "I can answer questions through the backend chat route or run protected actions through the task broker. Pick a suggestion or type your next request below.",
+    "I can answer questions through the backend chat route or run protected actions through the task broker. Connect Google when you want Gmail and Calendar summaries here too.",
 };
 
 type ComposerMode = "assistant" | "action";
@@ -77,11 +90,13 @@ export default function SimpleAssistant({ user }: { user: AuthenticatedUser }) {
   const [history, setHistory] = useState<TaskHistoryItem[]>([]);
   const [permissions, setPermissions] = useState<PermissionMap>({});
   const [tokenInfo, setTokenInfo] = useState<TokenInfo | null>(null);
+  const [googleStatus, setGoogleStatus] = useState<GoogleStatus | null>(null);
   const [result, setResult] = useState<TaskResponse | null>(null);
   const [chatInput, setChatInput] = useState("What matters most in this project today?");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([welcomeMessage]);
   const [chatError, setChatError] = useState<string | null>(null);
   const [isChatLoading, setIsChatLoading] = useState(false);
+  const [isGoogleBusy, setIsGoogleBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const feedRef = useRef<HTMLDivElement | null>(null);
@@ -99,15 +114,17 @@ export default function SimpleAssistant({ user }: { user: AuthenticatedUser }) {
 
     async function loadDashboard() {
       try {
-        const dashboardData = await fetchJson<DashboardBootstrapResponse>(
-          `${apiBaseUrl}/dashboard/bootstrap`
-        );
+        const [dashboardData, googleConnection] = await Promise.all([
+          fetchJson<DashboardBootstrapResponse>(`${apiBaseUrl}/dashboard/bootstrap`),
+          fetchJson<GoogleStatus>(`${apiBaseUrl}/google/status`),
+        ]);
 
         if (!cancelled) {
           setAgents(dashboardData.agents);
           setHistory(dashboardData.history);
           setPermissions(dashboardData.permissions);
           setTokenInfo(dashboardData.token_info);
+          setGoogleStatus(googleConnection);
         }
       } catch (caughtError: unknown) {
         if (!cancelled) {
@@ -125,6 +142,41 @@ export default function SimpleAssistant({ user }: { user: AuthenticatedUser }) {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const googleState = params.get("google");
+    const googleMessage = params.get("message");
+    if (!googleState) {
+      return;
+    }
+
+    if (googleState === "connected") {
+      setChatMessages((currentMessages) => [
+        ...currentMessages,
+        createChatMessage(
+          "assistant",
+          googleMessage ?? "Google connected. Ask for Gmail and Calendar summaries anytime.",
+          "status"
+        ),
+      ]);
+      void fetchJson<GoogleStatus>(`${apiBaseUrl}/google/status`)
+        .then((connection) => setGoogleStatus(connection))
+        .catch(() => undefined);
+    } else {
+      setChatError(googleMessage ?? "Google connection failed.");
+    }
+
+    params.delete("google");
+    params.delete("message");
+    const nextQuery = params.toString();
+    const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}`;
+    window.history.replaceState({}, "", nextUrl);
   }, []);
 
   useEffect(() => {
@@ -158,21 +210,13 @@ export default function SimpleAssistant({ user }: { user: AuthenticatedUser }) {
     setPrompt(value);
   }
 
-  function handleTaskSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!trimmedPrompt || isPending) {
-      return;
-    }
-
-    setMode("action");
-    setError(null);
-
+  function runProtectedActionTask(inputText: string) {
     startTransition(async () => {
       try {
         const data = await fetchJson<TaskResponse>(`${apiBaseUrl}/tasks`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ input_text: trimmedPrompt }),
+          body: JSON.stringify({ input_text: inputText }),
         });
         const updatedHistory = await fetchJson<TaskHistoryItem[]>(`${apiBaseUrl}/history`);
         setResult(data);
@@ -181,11 +225,70 @@ export default function SimpleAssistant({ user }: { user: AuthenticatedUser }) {
         const message =
           caughtError instanceof Error ? caughtError.message : "Task submission failed.";
 
-        setError(
-          `${message} If you want real providers next, I can wire them once you share the credentials.`
-        );
+        setError(message);
       }
     });
+  }
+
+  function handleTaskSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!trimmedPrompt || isPending) {
+      return;
+    }
+
+    setMode("action");
+    setError(null);
+    runProtectedActionTask(trimmedPrompt);
+  }
+
+  async function handleConnectGoogle() {
+    if (isGoogleBusy) {
+      return;
+    }
+
+    setIsGoogleBusy(true);
+    setChatError(null);
+    try {
+      const response = await fetchJson<GoogleConnectResponse>(`${apiBaseUrl}/google/connect`, {
+        method: "POST",
+      });
+      window.location.href = response.auth_url;
+    } catch (caughtError: unknown) {
+      const message =
+        caughtError instanceof Error ? caughtError.message : "Could not start the Google connection flow.";
+      setChatError(message);
+      setIsGoogleBusy(false);
+    }
+  }
+
+  async function handleDisconnectGoogle() {
+    if (isGoogleBusy) {
+      return;
+    }
+
+    setIsGoogleBusy(true);
+    setChatError(null);
+    try {
+      await fetchJson<{ disconnected: boolean }>(`${apiBaseUrl}/google/connection`, {
+        method: "DELETE",
+      });
+      setGoogleStatus({
+        connected: false,
+        email: null,
+        scopes: [],
+        updated_at: null,
+      });
+      setChatMessages((currentMessages) => [
+        ...currentMessages,
+        createChatMessage("assistant", "Google was disconnected from this workspace.", "status"),
+      ]);
+    } catch (caughtError: unknown) {
+      const message =
+        caughtError instanceof Error ? caughtError.message : "Could not disconnect Google.";
+      setChatError(message);
+    } finally {
+      setIsGoogleBusy(false);
+    }
   }
 
   function handleChatSubmit(event: FormEvent<HTMLFormElement>) {
@@ -196,6 +299,7 @@ export default function SimpleAssistant({ user }: { user: AuthenticatedUser }) {
 
     setMode("assistant");
     setChatError(null);
+    const requestMessages = buildConversationMessages(chatMessages, trimmedChatInput);
     setChatMessages((currentMessages) => [
       ...currentMessages,
       createChatMessage("user", trimmedChatInput),
@@ -203,29 +307,37 @@ export default function SimpleAssistant({ user }: { user: AuthenticatedUser }) {
     setChatInput("");
     setIsChatLoading(true);
 
-    void fetchJson<ChatCompletionResponse>(`${apiBaseUrl}/chat`, {
+    const shouldUseGoogleSummary = shouldUseGoogleWorkspacePrompt(trimmedChatInput);
+    const endpoint = shouldUseGoogleSummary ? `${apiBaseUrl}/google/summary` : `${apiBaseUrl}/chat`;
+    const requestBody: ChatCompletionRequest = shouldUseGoogleSummary
+      ? { prompt: trimmedChatInput }
+      : { messages: requestMessages };
+
+    void fetchJson<ChatCompletionResponse | GoogleSummaryResponse>(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: trimmedChatInput }),
+      body: JSON.stringify(requestBody),
     })
       .then((data) => {
+        const sourceSuffix = "email_count" in data && "event_count" in data ? formatGoogleSourceSuffix(data) : "";
         setChatMessages((currentMessages) => [
           ...currentMessages,
-          createChatMessage("assistant", data.response),
+          createChatMessage("assistant", `${data.response}${sourceSuffix}`),
         ]);
       })
       .catch((caughtError: unknown) => {
         const message =
           caughtError instanceof Error
             ? caughtError.message
-            : "The assistant request failed. Confirm the backend and local model are running.";
+            : "The assistant request failed. Confirm the backend is running and Gemini is configured.";
 
         setChatError(message);
         setChatMessages((currentMessages) => [
           ...currentMessages,
           createChatMessage(
             "assistant",
-            "I couldn't answer just now. Check the backend logs, then try again."
+            "I couldn't answer just now. Check the backend logs, then try again.",
+            "status"
           ),
         ]);
       })
@@ -236,8 +348,8 @@ export default function SimpleAssistant({ user }: { user: AuthenticatedUser }) {
 
   return (
     <main className="min-h-screen bg-[#f6f4ef] text-slate-900 dark:bg-[#111111] dark:text-slate-100">
-      <div className="mx-auto flex min-h-screen max-w-[1440px] gap-4 p-4 sm:p-6">
-        <aside className="hidden w-72 shrink-0 rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#171717] lg:flex lg:flex-col">
+      <div className="mx-auto flex h-[calc(100dvh-2rem)] max-w-[1440px] gap-4 p-4 sm:h-[calc(100dvh-3rem)] sm:p-6">
+        <aside className="hidden h-full w-72 shrink-0 rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#171717] lg:flex lg:flex-col">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500 dark:text-slate-400">
               Authorized to Act
@@ -272,6 +384,39 @@ export default function SimpleAssistant({ user }: { user: AuthenticatedUser }) {
             <div className="mt-4 flex items-center gap-2 text-xs uppercase tracking-[0.16em] text-emerald-600 dark:text-emerald-300">
               <ShieldCheck className="h-4 w-4" />
               Auth0 active
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-3xl border border-slate-200 bg-slate-50 p-4 dark:border-white/10 dark:bg-white/[0.03]">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+              Google Workspace
+            </p>
+            <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">
+              {googleStatus?.connected
+                ? `Connected as ${googleStatus.email ?? "your Google account"} for Gmail and Calendar summaries.`
+                : "Connect Google to pull unread Gmail and today's calendar into the assistant."}
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={handleConnectGoogle}
+                disabled={isGoogleBusy}
+                className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+              >
+                <Link2 className="h-4 w-4" />
+                {googleStatus?.connected ? "Reconnect Google" : "Connect Google"}
+              </button>
+              {googleStatus?.connected ? (
+                <button
+                  type="button"
+                  onClick={handleDisconnectGoogle}
+                  disabled={isGoogleBusy}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200 dark:hover:bg-white/[0.08]"
+                >
+                  <Link2Off className="h-4 w-4" />
+                  Disconnect
+                </button>
+              ) : null}
             </div>
           </div>
 
@@ -334,7 +479,7 @@ export default function SimpleAssistant({ user }: { user: AuthenticatedUser }) {
           </a>
         </aside>
 
-        <section className="flex min-h-[calc(100vh-2rem)] min-w-0 flex-1 flex-col rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-[#171717]">
+        <section className="flex h-full min-w-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-[#171717]">
           <header className="flex flex-col gap-4 border-b border-slate-200 px-4 py-4 dark:border-white/10 sm:flex-row sm:items-center sm:justify-between sm:px-6">
             <div>
               <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
@@ -349,7 +494,7 @@ export default function SimpleAssistant({ user }: { user: AuthenticatedUser }) {
             </div>
           </header>
 
-          <div ref={feedRef} className="flex-1 overflow-y-auto px-4 py-6 sm:px-6">
+          <div ref={feedRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6">
             <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
               {showSuggestions ? (
                 <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-6 dark:border-white/10 dark:bg-white/[0.03]">
@@ -499,8 +644,9 @@ function Composer({
       <textarea
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => handleComposerKeyDown(event, disabled)}
         rows={4}
-        className="w-full resize-none bg-transparent px-2 py-2 text-sm leading-7 outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500"
+        className="max-h-52 min-h-[7.5rem] w-full resize-none overflow-y-auto bg-transparent px-2 py-2 text-sm leading-7 outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500"
         placeholder={placeholder}
       />
       <div className="mt-2 flex items-center justify-between gap-3">
@@ -518,6 +664,18 @@ function Composer({
       </div>
     </div>
   );
+}
+
+function handleComposerKeyDown(
+  event: React.KeyboardEvent<HTMLTextAreaElement>,
+  disabled: boolean
+) {
+  if (disabled || event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) {
+    return;
+  }
+
+  event.preventDefault();
+  event.currentTarget.form?.requestSubmit();
 }
 
 function ModeButton({
@@ -562,6 +720,13 @@ function HeaderPill({
   );
 }
 
+type MessageBlock =
+  | { type: "heading"; text: string }
+  | { type: "paragraph"; lines: string[] }
+  | { type: "unordered-list"; items: string[] }
+  | { type: "ordered-list"; items: string[] }
+  | { type: "code"; lines: string[] };
+
 function ChatBubble({
   role,
   content,
@@ -580,7 +745,84 @@ function ChatBubble({
       <p className="text-[11px] font-semibold uppercase tracking-[0.18em] opacity-70">
         {role === "assistant" ? "Assistant" : "You"}
       </p>
-      <p className="mt-2 whitespace-pre-wrap text-sm leading-7">{content}</p>
+      <FormattedMessageContent content={content} role={role} />
+    </div>
+  );
+}
+
+function FormattedMessageContent({
+  content,
+  role,
+}: {
+  content: string;
+  role: ChatMessage["role"];
+}) {
+  const toneClass =
+    role === "assistant"
+      ? "text-slate-700 dark:text-slate-200"
+      : "text-white dark:text-slate-900";
+  const accentClass =
+    role === "assistant"
+      ? "text-slate-500 dark:text-slate-400"
+      : "text-white/70 dark:text-slate-700";
+  const blocks = parseMessageBlocks(content);
+
+  return (
+    <div className={`mt-3 space-y-3 text-sm leading-7 ${toneClass}`}>
+      {blocks.map((block, index) => {
+        switch (block.type) {
+          case "heading":
+            return (
+              <h4
+                key={`${block.type}-${index}`}
+                className={`text-xs font-semibold uppercase tracking-[0.18em] ${accentClass}`}
+              >
+                {renderInlineContent(block.text)}
+              </h4>
+            );
+          case "unordered-list":
+            return (
+              <ul key={`${block.type}-${index}`} className="space-y-2 pl-5">
+                {block.items.map((item, itemIndex) => (
+                  <li key={`${index}-${itemIndex}`} className="list-disc">
+                    {renderInlineContent(item)}
+                  </li>
+                ))}
+              </ul>
+            );
+          case "ordered-list":
+            return (
+              <ol key={`${block.type}-${index}`} className="space-y-2 pl-5">
+                {block.items.map((item, itemIndex) => (
+                  <li key={`${index}-${itemIndex}`} className="list-decimal">
+                    {renderInlineContent(item)}
+                  </li>
+                ))}
+              </ol>
+            );
+          case "code":
+            return (
+              <pre
+                key={`${block.type}-${index}`}
+                className="overflow-x-auto rounded-2xl bg-slate-900/95 px-4 py-3 text-xs leading-6 text-slate-100 dark:bg-[#050505]"
+              >
+                <code>{block.lines.join("\n")}</code>
+              </pre>
+            );
+          case "paragraph":
+          default:
+            return (
+              <p key={`${block.type}-${index}`}>
+                {block.lines.map((line, lineIndex) => (
+                  <span key={`${index}-${lineIndex}`}>
+                    {lineIndex > 0 ? <br /> : null}
+                    {renderInlineContent(line)}
+                  </span>
+                ))}
+              </p>
+            );
+        }
+      })}
     </div>
   );
 }
@@ -619,6 +861,8 @@ function TaskResultCard({
   tokenInfo: TokenInfo | null;
   visibleScopes: string[];
 }) {
+  const detailEntries = Object.entries(result.result?.details ?? {}).slice(0, 8);
+
   return (
     <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5 dark:border-white/10 dark:bg-white/[0.03]">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -663,6 +907,14 @@ function TaskResultCard({
           ))}
         </div>
       </div>
+
+      {detailEntries.length > 0 ? (
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          {detailEntries.map(([label, value]) => (
+            <MetaItem key={label} label={label.replace(/_/g, " ")} value={formatDetailValue(value)} />
+          ))}
+        </div>
+      ) : null}
 
       <div className="mt-4 flex flex-wrap gap-2">
         {visibleScopes.map((scope) => (
@@ -717,9 +969,7 @@ function inferRoute(inputText: string) {
   if (["calendar", "meeting", "schedule", "invite"].some((term) => normalized.includes(term))) {
     return {
       agent_id: "calendar-agent",
-      action: ["show", "check", "read"].some((term) => normalized.includes(term))
-        ? "read"
-        : "schedule",
+      action: ["show", "check", "read"].some((term) => normalized.includes(term)) ? "read" : "schedule",
       resource: "google-calendar",
       confidence: "high" as const,
       reasoning: "The request reads like a scheduling task, so the calendar agent is most likely.",
@@ -735,6 +985,22 @@ function inferRoute(inputText: string) {
   };
 }
 
+function shouldUseGoogleWorkspacePrompt(inputText: string) {
+  const normalized = inputText.toLowerCase();
+  const mentionsGoogleSource = ["email", "gmail", "inbox", "calendar", "meeting", "schedule", "event"].some(
+    (term) => normalized.includes(term)
+  );
+  const mentionsWorkspaceIntent = [
+    "summarize",
+    "summary",
+    "brief",
+    "overview",
+    "unread",
+    "today",
+  ].some((term) => normalized.includes(term));
+  return mentionsGoogleSource && mentionsWorkspaceIntent;
+}
+
 async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
   const response = await fetch(input, init);
   const payload = (await response.json().catch(() => null)) as T | { detail?: unknown } | null;
@@ -748,12 +1014,171 @@ async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit): Promi
   return payload as T;
 }
 
-function createChatMessage(role: ChatMessage["role"], content: string): ChatMessage {
+function parseMessageBlocks(content: string): MessageBlock[] {
+  const lines = content.replace(/\r/g, "").split("\n");
+  const blocks: MessageBlock[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const currentLine = lines[index].trim();
+    if (!currentLine) {
+      index += 1;
+      continue;
+    }
+
+    if (currentLine.startsWith("```")) {
+      const codeLines: string[] = [];
+      index += 1;
+      while (index < lines.length && !lines[index].trim().startsWith("```")) {
+        codeLines.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length) {
+        index += 1;
+      }
+      blocks.push({ type: "code", lines: codeLines });
+      continue;
+    }
+
+    const chunk: string[] = [];
+    while (index < lines.length && lines[index].trim()) {
+      chunk.push(lines[index].trim());
+      index += 1;
+    }
+
+    if (chunk.every((line) => /^[-*•]\s+/.test(line))) {
+      blocks.push({
+        type: "unordered-list",
+        items: chunk.map((line) => line.replace(/^[-*•]\s+/, "")),
+      });
+      continue;
+    }
+
+    if (chunk.every((line) => /^\d+\.\s+/.test(line))) {
+      blocks.push({
+        type: "ordered-list",
+        items: chunk.map((line) => line.replace(/^\d+\.\s+/, "")),
+      });
+      continue;
+    }
+
+    if (chunk.length === 1) {
+      const heading = normalizeHeading(chunk[0]);
+      if (heading) {
+        blocks.push({ type: "heading", text: heading });
+        continue;
+      }
+    }
+
+    blocks.push({ type: "paragraph", lines: chunk });
+  }
+
+  return blocks;
+}
+
+function normalizeHeading(line: string) {
+  const markdownHeading = line.match(/^#{1,3}\s+(.+)/);
+  if (markdownHeading) {
+    return markdownHeading[1].trim();
+  }
+
+  if (line.endsWith(":") && line.length <= 60 && !line.includes(".")) {
+    return line.slice(0, -1).trim();
+  }
+
+  return null;
+}
+
+function renderInlineContent(text: string) {
+  const nodes: Array<string | JSX.Element> = [];
+  const pattern = /(\*\*[^*]+\*\*|`[^`]+`)/g;
+  let lastIndex = 0;
+
+  for (const match of text.matchAll(pattern)) {
+    const matchedText = match[0];
+    const startIndex = match.index ?? 0;
+    if (startIndex > lastIndex) {
+      nodes.push(text.slice(lastIndex, startIndex));
+    }
+
+    if (matchedText.startsWith("**") && matchedText.endsWith("**")) {
+      nodes.push(
+        <strong key={`${startIndex}-strong`} className="font-semibold text-current">
+          {matchedText.slice(2, -2)}
+        </strong>
+      );
+    } else if (matchedText.startsWith("`") && matchedText.endsWith("`")) {
+      nodes.push(
+        <code
+          key={`${startIndex}-code`}
+          className="rounded-md bg-slate-900/10 px-1.5 py-0.5 font-mono text-[0.92em] dark:bg-white/10"
+        >
+          {matchedText.slice(1, -1)}
+        </code>
+      );
+    }
+
+    lastIndex = startIndex + matchedText.length;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+
+  return nodes.length > 0 ? nodes : text;
+}
+
+function formatGoogleSourceSuffix(summary: GoogleSummaryResponse) {
+  return `\n\nSource snapshot: ${summary.email_count} unread emails and ${summary.event_count} events.`;
+}
+
+function formatDetailValue(value: unknown) {
+  if (value == null) {
+    return "None";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return value.length > 0 ? JSON.stringify(value) : "[]";
+  }
+  return JSON.stringify(value);
+}
+
+function createChatMessage(
+  role: ChatMessage["role"],
+  content: string,
+  kind: ChatMessage["kind"] = "conversation"
+): ChatMessage {
   return {
     id: `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     role,
     content,
+    kind,
   };
+}
+
+function buildConversationMessages(
+  currentMessages: ChatMessage[],
+  latestUserInput: string
+): ChatCompletionRequest["messages"] {
+  const history = [
+    ...currentMessages.filter((message) => message.kind === "conversation"),
+    {
+      id: "pending-user-turn",
+      role: "user" as const,
+      content: latestUserInput,
+      kind: "conversation" as const,
+    },
+  ];
+
+  return history.slice(-12).map(({ role, content }) => ({
+    role,
+    content,
+  }));
 }
 
 function getInitials(name: string) {
