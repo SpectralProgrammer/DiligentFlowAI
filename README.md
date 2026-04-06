@@ -567,6 +567,7 @@ Fix:
 
 ## Suggested Next Improvements
 
+- connect more google services to diversify project capabilities 
 - replace in-memory task history with persistent storage
 - move Google token storage from SQLite to a managed database
 - wire the permission layer to a real policy backend
