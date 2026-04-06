@@ -1,6 +1,8 @@
-# Authorized to Act
+# DiligentFlowAI
 
-Authorized to Act is a split Next.js and FastAPI application that uses Auth0 for user sessions, proxies protected API calls through the frontend, and can optionally connect Gmail and Google Calendar for summaries.
+<img width="800" alt="image" src="https://github.com/user-attachments/assets/3b15e597-00c2-4db3-ae74-640084abe77f" />
+
+DiligentFlowAI is a split Next.js and FastAPI application that uses Auth0 for user sessions, proxies protected API calls through the frontend, and can optionally connect Gmail and Google Calendar for summaries.
 
 ## Deployment Path
 
