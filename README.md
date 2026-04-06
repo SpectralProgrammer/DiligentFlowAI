@@ -1,6 +1,8 @@
 # DiligentFlowAI
 
-<img width="500" alt="image" src="https://github.com/user-attachments/assets/3b15e597-00c2-4db3-ae74-640084abe77f" />
+<div align="center">
+  <img width="500" alt="image" src="https://github.com/user-attachments/assets/3b15e597-00c2-4db3-ae74-640084abe77f" />
+</div>
 
 DiligentFlowAI is a secure multi-agent AI system that connects to user applications and automates everyday workflows such as email management, scheduling, and task organization. Using Auth0 for AI Agents and Token Vault, it safely authenticates and authorizes access to services like email and calendar, allowing AI agents to act on the user’s behalf while maintaining full user control and consent.
 
