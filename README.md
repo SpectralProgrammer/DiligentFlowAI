@@ -2,7 +2,11 @@
 
 <img width="500" alt="image" src="https://github.com/user-attachments/assets/3b15e597-00c2-4db3-ae74-640084abe77f" />
 
-DiligentFlowAI is a split Next.js and FastAPI application that uses Auth0 for user sessions, proxies protected API calls through the frontend, and can optionally connect Gmail and Google Calendar for summaries.
+DiligentFlowAI is a secure multi-agent AI system that connects to user applications and automates everyday workflows such as email management, scheduling, and task organization. Using Auth0 for AI Agents and Token Vault, it safely authenticates and authorizes access to services like email and calendar, allowing AI agents to act on the user’s behalf while maintaining full user control and consent.
+
+The system is powered by a modular agent architecture, where specialized agents handle specific tasks such as email prioritization, summarization, and calendar planning. A central orchestration layer coordinates these agents and communicates with external APIs through secure delegated access.
+
+DiligentFlowAI uses hosted AI models to analyze user data, generate insights, and recommend actions in real time. The result is a privacy-conscious, automated assistant that helps users stay organized and productive without manually managing their digital workflows.
 
 ## Deployment Path
 
