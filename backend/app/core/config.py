@@ -3,14 +3,40 @@ from functools import lru_cache
 import os
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 REPO_ROOT = BACKEND_DIR.parent
 
-load_dotenv(REPO_ROOT / ".env")
-load_dotenv(BACKEND_DIR / ".env")
-load_dotenv(REPO_ROOT / "frontend" / ".env.local")
+
+def _load_environment() -> None:
+    # Merge repo env files explicitly so more specific local files can override
+    # empty placeholders in broader defaults, while real shell env vars still win.
+    merged_env: dict[str, str] = {}
+
+    for env_path in (
+        REPO_ROOT / ".env",
+        BACKEND_DIR / ".env",
+        REPO_ROOT / "frontend" / ".env.local",
+    ):
+        if not env_path.exists():
+            continue
+
+        merged_env.update(
+            {
+                key: value
+                for key, value in dotenv_values(env_path).items()
+                if value is not None
+            }
+        )
+
+    for key, value in merged_env.items():
+        existing_value = os.environ.get(key)
+        if existing_value is None or existing_value == "":
+            os.environ[key] = value
+
+
+_load_environment()
 
 
 def _normalize_domain(domain: str | None) -> str | None:
