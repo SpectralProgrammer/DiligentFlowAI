@@ -9,6 +9,8 @@
 🏆 Hackathon: 
 Built for Authorized to Act: Auth0 for AI Agents (Devpost)
 
+🎥 Video Demo: https://www.youtube.com/watch?v=Qyi8kmUTg0k 
+
 ---
 
 <div align="center">
