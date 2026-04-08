@@ -1,12 +1,12 @@
 # DiligentFlowAI
 
-📌 Original Repository[https://github.com/heyamktr/DiligentFlowAI]
+📌 [Original Repository](https://github.com/heyamktr/DiligentFlowAI)
 
-👨‍💻 Authors
-Shravan Devraj[https://github.com/SpectralProgrammer]
-Khanh Truong[https://github.com/heyamktr]
+👨‍💻 Authors\n
+[Shravan Devraj](https://github.com/SpectralProgrammer)
+[Khanh Truong](https://github.com/heyamktr)
 
-🏆 Hackathon
+🏆 Hackathon\n
 Built for Authorized to Act: Auth0 for AI Agents (Devpost)
 
 ---
