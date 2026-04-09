@@ -84,8 +84,6 @@ The important runtime entrypoints are:
   Sends or drafts Gmail messages.
 - `calendar-agent`
   Reads or schedules Google Calendar events.
-- `finance-agent`
-  Handles finance and market-data prompts.
 
 ### Permission Model
 
@@ -93,7 +91,6 @@ The current permission layer is intentionally simple and local:
 
 - `email-agent` -> `send:gmail-api`, `draft:gmail-api`
 - `calendar-agent` -> `schedule:google-calendar`, `read:google-calendar`
-- `finance-agent` -> `analyze:market-data`, `summarize:market-data`
 
 This project calls that layer `openfga_client`, but today it is an in-memory policy matrix rather than a live OpenFGA integration.
 
@@ -128,9 +125,6 @@ These are the kinds of inputs the current parser and UI are built around:
   Usually maps to `email-agent`.
 - `Plan my calendar around two deep work blocks tomorrow afternoon.`
   Usually maps to `calendar-agent`.
-- `Analyze Nvidia and summarize the biggest market signals before lunch.`
-  Usually maps to `finance-agent`.
-- `Summarize my unread emails and today's calendar.`
   Uses the Google summary flow if Google is connected.
 
 ## Prerequisites
